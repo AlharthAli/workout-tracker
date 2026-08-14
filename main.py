@@ -56,6 +56,20 @@ def list_excercises():
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+@app.post("/workout")
+def create_workout(workout: Workout):
+    conn = sqlite3.connect("workout.db")
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "INSERT INTO workouts (user_id,date) VALUES (?, ?)",
+        (workout.user_id, workout.date)
+    )
+    
+    conn.commit()
+    conn.close()
+    return {"message": "Workout added successfully"}
                 
     
     
