@@ -94,6 +94,16 @@ def create_set(set_data: Set):
     conn.commit()
     conn.close()
     return {"message": "Set added successfully"}
+
+@app.get("/sets")
+def list_set():
+    conn  = sqlite3.connect("workout.db")
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM sets")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
                 
     
     
