@@ -70,6 +70,30 @@ def create_workout(workout: Workout):
     conn.commit()
     conn.close()
     return {"message": "Workout added successfully"}
+
+@app.get("/workouts")
+def list_workouts():
+    conn = sqlite3.connect("workout.db")
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM workouts")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+@app.post("/sets")
+def create_set(set_data: Set):
+    conn = sqlite3.connect("workout.db")
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "INSERT INTO sets (workout_id,exercise_id,set_number,reps,weight,completed) VALUES (?, ?, ?, ?, ?, ?)",
+        (set_data.workout_id, set_data.exercise_id, set_data.set_number, set_data.reps, set_data.weight, set_data.completed)
+    )
+    
+    conn.commit()
+    conn.close()
+    return {"message": "Set added successfully"}
                 
     
     
