@@ -1,3 +1,4 @@
+import sqlite3
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
@@ -31,9 +32,33 @@ class Set(BaseModel):
     reps : int
     weight : float
     completed : bool = True
+    
+@app.post("/exercise")
+def create_exercise(exercise: Exercise):
+    conn = sqlite3.connect("workout.db")
+    cursor = conn.cursor()
 
-#creating api and adding routes
-@app.get("/")
-def tes():
-    return {"hello":"world"}
+    cursor.execute(
+        "INSERT INTO exercises (name, muscle_group) VALUES (?, ?)",
+        (exercise.name, exercise.muscle_group)
+    )
+
+    conn.commit()
+    conn.close()
+    return {"message": "Exercise added successfully"}
+
+@app.get("/exercises")
+def list_excercises():
+    conn = sqlite3.connect("workout.db")
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM exercises")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+                
+    
+    
+
+
 
