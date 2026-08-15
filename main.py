@@ -104,6 +104,23 @@ def list_set():
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+@app.get("/exercises/{exercise_id}/history")
+def get_exercise_history(exercise_id: int):
+    conn = sqlite3.connect("workout.db")
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT sets.reps, sets.weight, sets.completed, workouts.date
+        FROM sets
+        JOIN workouts ON sets.workout_id = workouts.id
+        WHERE sets.exercise_id = ?
+        ORDER BY workouts.date
+    """, (exercise_id,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
                 
     
     
