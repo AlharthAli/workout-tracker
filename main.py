@@ -124,6 +124,7 @@ def get_exercise_history(exercise_id: int):
 
 REP_RANGE_MIN = 8
 REP_RANGE_MAX = 10
+PLATEAU_SESSION_COUNT = 3
 
 @app.get("/exercises/{exercise_id}/recommendation")
 def get_recommendation(exercise_id: int):
@@ -144,11 +145,25 @@ def get_recommendation(exercise_id: int):
     if not history:
         return {"message": "No history yet — log a set to get started"}
     
-    # Pull out every set from the most recent session (same date as the last logged set)
+    # Pull out every set from the most recent session
     latest_date = history[-1][3]
     latest_session_sets = [s for s in history if s[3] == latest_date]
     
     current_weight = latest_session_sets[0][1]
+    
+    # Check for a plateau: has the weight stayed the same across the last 3 sessions?
+    all_dates = sorted(set(s[3] for s in history))
+    if len(all_dates) >= PLATEAU_SESSION_COUNT:
+        last_three_dates = all_dates[-PLATEAU_SESSION_COUNT:]
+        weights_used = [
+            next(s[1] for s in history if s[3] == date)
+            for date in last_three_dates
+        ]
+        if len(set(weights_used)) == 1:
+            return {
+                "recommended_weight": current_weight,
+                "reason": f"Plateau detected — weight unchanged for {PLATEAU_SESSION_COUNT} sessions. Consider a deload or exercise swap."
+            }
     
     # Double progression: only increase weight once every set hits the top of the rep range
     all_hit_max = all(s[0] >= REP_RANGE_MAX for s in latest_session_sets)
@@ -169,8 +184,3 @@ def get_recommendation(exercise_id: int):
             "recommended_weight": current_weight,
             "reason": "Still progressing within the rep range — keep the same weight"
         }
-    
-    
-
-
-
