@@ -37,6 +37,10 @@ class Set(BaseModel):
     weight : float
     completed : bool = True
     
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    
 @app.post("/exercise")
 def create_exercise(exercise: Exercise):
     conn = sqlite3.connect("workout.db")
@@ -204,3 +208,26 @@ def create_user(user: User):
     conn.commit()
     conn.close()
     return {"message": "User created successfully"}
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/login")
+def login(credentials: LoginRequest):
+    conn = sqlite3.connect("workout.db")
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id, password_hash FROM users WHERE email = ?", (credentials.email,))
+    user = cursor.fetchone()
+    conn.close()
+    
+    if user is None:
+        return {"message": "Invalid email or password"}
+    
+    stored_hash = user[1]
+    
+    if pwd_context.verify(credentials.password, stored_hash):
+        return {"message": "Login successful", "user_id": user[0]}
+    else:
+        return {"message": "Invalid email or password"}
