@@ -2,6 +2,10 @@ import sqlite3
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
+from passlib.context import CryptContext
+from datetime import date
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 app = FastAPI()
 
@@ -184,3 +188,19 @@ def get_recommendation(exercise_id: int):
             "recommended_weight": current_weight,
             "reason": "Still progressing within the rep range — keep the same weight"
         }
+        
+@app.post("/users")
+def create_user(user: User):
+    hashed_password = pwd_context.hash(user.password)
+    
+    conn = sqlite3.connect("workout.db")
+    cursor = conn.cursor()
+    
+    cursor.execute(
+    "INSERT INTO users (name, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+    (user.name, user.email, hashed_password, str(date.today()))
+    )
+    
+    conn.commit()
+    conn.close()
+    return {"message": "User created successfully"}
