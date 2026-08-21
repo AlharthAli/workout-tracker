@@ -1,9 +1,10 @@
 import os
 import psycopg2
+from contextlib import contextmanager
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from passlib.context import CryptContext
 from datetime import date
 
@@ -19,8 +20,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Centralized connection helper — every route calls this instead of
-# repeating the same psycopg2.connect(...) block everywhere
 def get_connection():
     return psycopg2.connect(
         host=os.getenv("DB_HOST"),
@@ -30,10 +29,26 @@ def get_connection():
         password=os.getenv("DB_PASSWORD")
     )
 
+# Context manager so every route gets automatic commit/rollback/close
+# and any DB error becomes a 422 HTTPException (CORS-safe JSON) instead
+# of a raw 500 text/plain that the browser can't read cross-origin.
+@contextmanager
+def db():
+    conn = get_connection()
+    try:
+        yield conn
+        conn.commit()
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=422, detail=str(e).strip())
+    finally:
+        conn.close()
+
+
 class User(BaseModel):
     name: str
     email: str
-    password: str  # plain password from the request; hashed before storage, never stored raw
+    password: str  # plain — hashed before storage
 
 class Exercise(BaseModel):
     name: str
@@ -55,84 +70,97 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
+
 @app.post("/exercise")
 def create_exercise(exercise: Exercise):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO exercises (name, muscle_group) VALUES (%s, %s)",
-        (exercise.name, exercise.muscle_group)
-    )
-    conn.commit()
-    conn.close()
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO exercises (name, muscle_group) VALUES (%s, %s)",
+            (exercise.name, exercise.muscle_group)
+        )
     return {"message": "Exercise added successfully"}
 
 @app.get("/exercises")
-def list_excercises():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM exercises")
-    rows = cursor.fetchall()
-    conn.close()
+def list_exercises():
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM exercises ORDER BY muscle_group, name")
+        rows = cur.fetchall()
     return rows
 
 @app.post("/workout")
 def create_workout(workout: Workout):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO workouts (user_id, date) VALUES (%s, %s)",
-        (workout.user_id, workout.date)
-    )
-    conn.commit()
-    conn.close()
-    return {"message": "Workout added successfully"}
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO workouts (user_id, date) VALUES (%s, %s) RETURNING id",
+            (workout.user_id, workout.date)
+        )
+        workout_id = cur.fetchone()[0]
+    return {"message": "Workout added successfully", "id": workout_id}
 
 @app.get("/workouts")
-def list_workouts():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM workouts")
-    rows = cursor.fetchall()
-    conn.close()
+def list_workouts(user_id: int = None):
+    with db() as conn:
+        cur = conn.cursor()
+        if user_id is not None:
+            cur.execute(
+                "SELECT * FROM workouts WHERE user_id = %s ORDER BY date DESC, id DESC",
+                (user_id,)
+            )
+        else:
+            cur.execute("SELECT * FROM workouts ORDER BY date DESC, id DESC")
+        rows = cur.fetchall()
+    return rows
+
+@app.get("/workouts/{workout_id}/sets")
+def get_workout_sets(workout_id: int):
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT sets.id, sets.workout_id, sets.exercise_id, exercises.name,
+                   sets.set_number, sets.reps, sets.weight, sets.completed
+            FROM sets
+            JOIN exercises ON sets.exercise_id = exercises.id
+            WHERE sets.workout_id = %s
+            ORDER BY sets.exercise_id, sets.set_number
+        """, (workout_id,))
+        rows = cur.fetchall()
     return rows
 
 @app.post("/sets")
 def create_set(set_data: Set):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO sets (workout_id, exercise_id, set_number, reps, weight, completed) VALUES (%s, %s, %s, %s, %s, %s)",
-        (set_data.workout_id, set_data.exercise_id, set_data.set_number, set_data.reps, set_data.weight, set_data.completed)
-    )
-    conn.commit()
-    conn.close()
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO sets (workout_id, exercise_id, set_number, reps, weight, completed) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (set_data.workout_id, set_data.exercise_id, set_data.set_number,
+             set_data.reps, set_data.weight, set_data.completed)
+        )
     return {"message": "Set added successfully"}
 
 @app.get("/sets")
-def list_set():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM sets")
-    rows = cursor.fetchall()
-    conn.close()
+def list_sets():
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM sets")
+        rows = cur.fetchall()
     return rows
 
 @app.get("/exercises/{exercise_id}/history")
 def get_exercise_history(exercise_id: int):
-    # Joins sets with workouts to pull each set's date, since sets
-    # only stores workout_id, not the date itself
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT sets.reps, sets.weight, sets.completed, workouts.date
-        FROM sets
-        JOIN workouts ON sets.workout_id = workouts.id
-        WHERE sets.exercise_id = %s
-        ORDER BY workouts.date
-    """, (exercise_id,))
-    rows = cursor.fetchall()
-    conn.close()
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT sets.reps, sets.weight, sets.completed, workouts.date
+            FROM sets
+            JOIN workouts ON sets.workout_id = workouts.id
+            WHERE sets.exercise_id = %s
+            ORDER BY workouts.date
+        """, (exercise_id,))
+        rows = cur.fetchall()
     return rows
 
 REP_RANGE_MIN = 8
@@ -141,30 +169,24 @@ PLATEAU_SESSION_COUNT = 3
 
 @app.get("/exercises/{exercise_id}/recommendation")
 def get_recommendation(exercise_id: int):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT sets.reps, sets.weight, sets.completed, workouts.date
-        FROM sets
-        JOIN workouts ON sets.workout_id = workouts.id
-        WHERE sets.exercise_id = %s
-        ORDER BY workouts.date
-    """, (exercise_id,))
-    history = cursor.fetchall()
-    conn.close()
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT sets.reps, sets.weight, sets.completed, workouts.date
+            FROM sets
+            JOIN workouts ON sets.workout_id = workouts.id
+            WHERE sets.exercise_id = %s
+            ORDER BY workouts.date
+        """, (exercise_id,))
+        history = cur.fetchall()
 
     if not history:
         return {"message": "No history yet — log a set to get started"}
 
-    # Evaluate the whole most-recent session, not just the last row —
-    # the last logged set could be the hardest set of the day and
-    # misrepresent how the session actually went
     latest_date = history[-1][3]
     latest_session_sets = [s for s in history if s[3] == latest_date]
     current_weight = latest_session_sets[0][1]
 
-    # Plateau check runs first: 3+ sessions at the same weight overrides
-    # a simple progression recommendation
     all_dates = sorted(set(s[3] for s in history))
     if len(all_dates) >= PLATEAU_SESSION_COUNT:
         last_three_dates = all_dates[-PLATEAU_SESSION_COUNT:]
@@ -178,9 +200,7 @@ def get_recommendation(exercise_id: int):
                 "reason": f"Plateau detected — weight unchanged for {PLATEAU_SESSION_COUNT} sessions. Consider a deload or exercise swap."
             }
 
-    # Double progression: only increase weight once every set in the
-    # session hits the top of the rep range
-    all_hit_max = all(s[0] >= REP_RANGE_MAX for s in latest_session_sets)
+    all_hit_max  = all(s[0] >= REP_RANGE_MAX for s in latest_session_sets)
     any_below_min = any(s[0] < REP_RANGE_MIN for s in latest_session_sets)
 
     if all_hit_max:
@@ -202,29 +222,24 @@ def get_recommendation(exercise_id: int):
 @app.post("/users")
 def create_user(user: User):
     hashed_password = pwd_context.hash(user.password)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO users (name, email, password_hash, created_at) VALUES (%s, %s, %s, %s)",
-        (user.name, user.email, hashed_password, str(date.today()))
-    )
-    conn.commit()
-    conn.close()
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO users (name, email, password_hash, created_at) VALUES (%s, %s, %s, %s)",
+            (user.name, user.email, hashed_password, str(date.today()))
+        )
     return {"message": "User created successfully"}
 
 @app.post("/login")
 def login(credentials: LoginRequest):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, password_hash FROM users WHERE email = %s", (credentials.email,))
-    user = cursor.fetchone()
-    conn.close()
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, password_hash FROM users WHERE email = %s", (credentials.email,))
+        user = cur.fetchone()
 
     if user is None:
         return {"message": "Invalid email or password"}
 
-    stored_hash = user[1]
-    if pwd_context.verify(credentials.password, stored_hash):
+    if pwd_context.verify(credentials.password, user[1]):
         return {"message": "Login successful", "user_id": user[0]}
-    else:
-        return {"message": "Invalid email or password"}
+    return {"message": "Invalid email or password"}

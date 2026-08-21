@@ -82,7 +82,8 @@ references one exercise.
 | POST   | `/exercise`                           | Add an exercise to the catalog          |
 | GET    | `/exercises`                          | List all exercises                      |
 | POST   | `/workout`                            | Start a new workout session             |
-| GET    | `/workouts`                           | List all workout sessions               |
+| GET    | `/workouts`                           | List all sessions (optional `?user_id=` filter) |
+| GET    | `/workouts/{id}/sets`                 | All sets for one session, with exercise names |
 | POST   | `/sets`                               | Log a set                               |
 | GET    | `/sets`                               | List all logged sets                    |
 | GET    | `/exercises/{id}/history`             | Full set history for one exercise       |
