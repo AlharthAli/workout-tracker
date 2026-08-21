@@ -1,11 +1,13 @@
 # Adaptive Workout Tracker
 
-A deployed REST API that tracks workout history and generates personalized
+A full-stack workout tracking app that logs sessions and generates personalized
 weight/rep recommendations using a double-progression algorithm — instead of
 logging sets into a static spreadsheet, the app tells you what to lift next
 based on how your last session actually went.
 
-**Live API:** `http://3.143.205.91:8000/docs`
+**Live App:** http://workout-tracker-frontend-930271538018.s3-website.us-east-2.amazonaws.com
+
+**Live API:** http://workout-tracker-alb-1218280969.us-east-2.elb.amazonaws.com/docs
 
 ## How it works
 
@@ -31,6 +33,7 @@ flat "add 5lbs every week" rule.
 
 ## Tech stack
 
+- **React + Vite** — frontend SPA
 - **Python 3** / **FastAPI** — REST API
 - **PostgreSQL** (AWS RDS) — persistent relational storage
 - **Pydantic** — request validation
@@ -38,25 +41,30 @@ flat "add 5lbs every week" rule.
 - **Docker** — containerization
 - **AWS ECS (Fargate)** — container orchestration and hosting
 - **AWS ECR** — Docker image registry
+- **AWS ALB** — Application Load Balancer for stable API URL
+- **AWS S3** — static frontend hosting
 - **Git/GitHub** — version control
 
 ## Architecture
 
 ```
-Client (browser / future frontend)
+Browser (React app on S3)
         │
         ▼
-AWS ECS (Fargate) — runs the Dockerized FastAPI app, publicly reachable
+AWS ALB (stable DNS, port 80)
         │
         ▼
-AWS RDS (PostgreSQL) — persistent storage, private, only reachable by the app
+AWS ECS (Fargate) — runs the Dockerized FastAPI app
+        │
+        ▼
+AWS RDS (PostgreSQL) — persistent storage, private subnet
 ```
 
-The app and database run as separate AWS resources. The database is only
-reachable from within AWS's network (not the public internet), while the
-app itself is publicly reachable on port 8000. Credentials are passed to
-the container via environment variables and never committed to source
-control.
+The frontend is served from S3 as a static site. The API runs on ECS behind
+an Application Load Balancer, which gives it a permanent DNS name that
+doesn't change when tasks restart. The database is only reachable from within
+AWS's network. Credentials are passed to the container via environment
+variables and never committed to source control.
 
 ## Database schema
 
@@ -89,7 +97,7 @@ references one exercise.
 | GET    | `/exercises/{id}/history`             | Full set history for one exercise       |
 | GET    | `/exercises/{id}/recommendation`      | Get the next weight/rep recommendation  |
 
-Interactive docs available at `/docs` on both the live deployment and locally.
+Interactive docs available at `/docs` on the live API and locally.
 
 ## Running locally
 
@@ -122,4 +130,6 @@ docker run -p 8000:8000 --env-file .env workout-tracker
 - [x] User signup with hashed passwords
 - [x] Docker containerization
 - [x] Deployment to AWS (ECS + RDS)
-- [ ] React frontend
+- [x] React frontend with session logging, history, and weekly summary
+- [x] ALB for stable API URL
+- [x] S3 static hosting for frontend
