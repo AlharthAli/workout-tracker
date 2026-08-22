@@ -66,6 +66,11 @@ class Set(BaseModel):
     weight: float
     completed: bool = True
 
+class SetUpdate(BaseModel):
+    reps: int | None = None
+    weight: float | None = None
+    completed: bool | None = None
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -148,6 +153,36 @@ def list_sets():
         cur.execute("SELECT * FROM sets")
         rows = cur.fetchall()
     return rows
+
+@app.delete("/sets/{set_id}")
+def delete_set(set_id: int):
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM sets WHERE id = %s RETURNING id", (set_id,))
+        deleted = cur.fetchone()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Set not found")
+    return {"message": "Set deleted"}
+
+@app.put("/sets/{set_id}")
+def update_set(set_id: int, update: SetUpdate):
+    fields, values = [], []
+    if update.reps is not None:
+        fields.append("reps = %s"); values.append(update.reps)
+    if update.weight is not None:
+        fields.append("weight = %s"); values.append(update.weight)
+    if update.completed is not None:
+        fields.append("completed = %s"); values.append(update.completed)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    values.append(set_id)
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE sets SET {', '.join(fields)} WHERE id = %s RETURNING id", values)
+        updated = cur.fetchone()
+    if not updated:
+        raise HTTPException(status_code=404, detail="Set not found")
+    return {"message": "Set updated"}
 
 @app.get("/exercises/{exercise_id}/history")
 def get_exercise_history(exercise_id: int):
