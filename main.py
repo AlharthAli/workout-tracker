@@ -48,7 +48,7 @@ def db():
 class User(BaseModel):
     name: str
     email: str
-    password: str  # plain — hashed before storage
+    password: str  # plain hashed before storage
 
 class Exercise(BaseModel):
     name: str
